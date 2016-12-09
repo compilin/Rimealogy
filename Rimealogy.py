@@ -151,61 +151,76 @@ if __name__ == "__main__":
 		print("Must supply input filename")
 		exit(1)
 	
-	drawall = False if len(argv) < 4 else True
+	drawset = argv[3].lower() if len(argv) > 3 else "colony"
+	if drawset not in ["colony", "seen", "all"]:
+		print("Unknown pawn selection '%s'. Known : colony, seen, all" % drawset)
+		exit(1)
+	
+	nameset = argv[4].lower() if len(argv) > 4 else "seen"
+	if nameset not in ["seen", "related", "all"]:
+		print("Unknown named selection '%s'. Known : seen, related, all" % nameset)
+		exit(1)
 	
 	filename = argv[1]
 	print("Parsing file %s" % filename)
 	doc = ET.parse(filename)
 	print("Retreiving game data")
 	game = Game(doc.find('game'))
-	
-	display = set([None])
-	if not drawall:
-		nextPawns = set([k for k,h in game.humans.items() if h.faction == game.playerFaction ])
+		
+	if nameset == "seen":
+		named = set(k for k,v in game.humans.items() if v.seen)
+	elif nameset == "related":
+		named = set(k for k,v in game.humans.items() if v.seen) | \
+			set(p for col in game.humans.values() if col.faction == game.playerFaction for p in col.parents) | \
+			set(r.other for col in game.humans.values() if col.faction == game.playerFaction for r in col.relations)
 	else:
-		nextPawns = set([k for k,h in game.humans.items() if h.seen ])
-	newPawns = set()
-
-	while len(nextPawns) > 0:
-		display |= nextPawns
-		for nxt in nextPawns:
-			pawn = game.humans[nxt]
-			if pawn.seen:
-				newPawns |= set(filter(lambda x: x in game.humans, pawn.parents | set(pawn.children)))
-		newPawns -= display
-		newPawns -= nextPawns
-		nextPawns = newPawns
+		named = set(game.humans.keys())
+	
+	if drawset == "all":
+		display = set(game.humans.keys())
+	else:
+		display = set([None])
+		if drawset == "colony":
+			nextPawns = set([k for k,h in game.humans.items() if h.faction == game.playerFaction ])
+		elif drawset == "seen":
+			nextPawns = set([k for k,h in game.humans.items() if h.seen ])
 		newPawns = set()
 
-	seen = set(k for k,v in game.humans.items() if v.seen) | \
-			set(r.other for col in game.humans.values() if col.faction == game.playerFaction for r in col.relations)
-	display |= set(r.other for col in game.humans.values() if col.faction == game.playerFaction for r in col.relations)
-	
-	print("Filtering pawns to show ... %d selected" % len(display))
+		while len(nextPawns) > 0:
+			display |= nextPawns
+			for nxt in nextPawns:
+				if nxt in named:
+					newPawns |= set(filter(lambda x: x in game.humans, game.humans[nxt].parents | set(game.humans[nxt].children)))
+			newPawns -= display
+			newPawns -= nextPawns
+			nextPawns = newPawns
+			newPawns = set()
+		
+	print("Filtering pawns to show ... %d drawn, %d named out of %d existing" % (len(display), len(named), len(game.humans)))
 	
 	factionCols = dict()
 	for k,fac in game.factions.items():
 		if k == game.playerFaction:
-			factionCols[k] = "#DDDDFF"
+			factionCols[k] = "#CCCCFF"
 		else:
 			if game.playerFaction not in fac.relations or fac.relations[game.playerFaction] == 0:
-				factionCols[k] = "#DDDDDD"
+				factionCols[k] = "#EEEEEE"
 			elif fac.relations[game.playerFaction] > 0:
-				factionCols[k] = "#DDFFDD"
+				factionCols[k] = "#CCFFCC"
 			elif fac.relations[game.playerFaction] < 0:
-				factionCols[k] = "#FFDDDD"
+				factionCols[k] = "#FFCCCC"
 	virtualNodeId = 0
 	
 	outfilename = "./tree.dot" if len(argv) < 3 else argv[2]
 	print("Writing to file %s" % outfilename)
 	with open(outfilename, 'w') as file:
 		file.write('digraph Geneaolgy {\n')
-		file.write('\tgraph [overlap=prism,rankdir=LR,splines=line,outputorder=edgesfirst];\n' +
+		file.write('\tgraph [overlap=prism,rankdir=LR,splines=line,outputorder=edgesfirst,nodesep=.5];\n' +
 					'\tnode [label="",shape=box,style=filled];\n')
 
 		for n,h in sorted(game.humans.items()):
 			if n in display:
-				if n in seen:
+				if n in named:
 					label = h.name.getFullName()
 					fillcol = factionCols[h.faction]
 					if not h.alive:
@@ -216,26 +231,27 @@ if __name__ == "__main__":
 				file.write('\t%s [label="%s",fillcolor="%s"];\n' % (n, label, fillcol))
 			if h.faction == game.playerFaction:
 				for r in sorted(h.relations, key=lambda x: x.other):
-					style = "dotted"
-					if 'Spouse' in r.type:
-						style = "bold"
-					elif 'Fiance' in r.type:
-						style = "dashed"
-					color = "black"
-					if 'Ex' in r.type:
-						color = "brown"
-					elif not (h.alive and game.humans[r.other].alive):
-						color = "#80800080"
+					if r.other in display:
+						style = "dotted"
+						if 'Spouse' in r.type:
+							style = "bold"
+						elif 'Fiance' in r.type:
+							style = "dashed"
+						color = "black"
+						if 'Ex' in r.type:
+							color = "brown"
+						elif not (h.alive and game.humans[r.other].alive):
+							color = "#80800080"
 
-					if game.humans[r.other].faction != game.playerFaction or n < r.other:
-						tt = "%s <%s> %s" % (h.name.nick, r.type, game.humans[r.other].name.nick)
-						file.write('\t%s -> %s [xlabel="%s",constraint=false,dir=both,style=%s,color="%s",tooltip="%s",labeltooltip="%s"];' % 
-							(n, r.other, r.type, style, color, tt, tt))
-					virtNode = 'Virtual_%s' % virtualNodeId
-					file.write('\t%s [style=invis];\n' % virtNode)
-					file.write('\t%s -> %s [style=invis];\n' % (virtNode, n))
-					file.write('\t%s -> %s [style=invis];\n' % (virtNode, r.other))
-					virtualNodeId += 1
+						if game.humans[r.other].faction != game.playerFaction or n < r.other:
+							tt = "%s <%s> %s" % (h.name.nick, r.type, game.humans[r.other].name.nick)
+							file.write('\t%s -> %s [xlabel="%s",constraint=false,dir=both,style=%s,color="%s",tooltip="%s",labeltooltip="%s"];' % 
+								(n, r.other, r.type, style, color, tt, tt))
+						virtNode = 'Virtual_%s' % virtualNodeId
+						file.write('\t%s [style=invis];\n' % virtNode)
+						file.write('\t%s -> %s [style=invis];\n' % (virtNode, n))
+						file.write('\t%s -> %s [style=invis];\n' % (virtNode, r.other))
+						virtualNodeId += 1
 
 		couples = set()
 
@@ -253,7 +269,5 @@ if __name__ == "__main__":
 					file.write('\t%s -> %s;\n' % (getCoupleId(h.parents), n))
 
 		file.write('}')
-	
-	print("Finished. Recommended parameters for graphviz:\ndot -Tsvg tree.dot > tree.svg")    
 	
 	
