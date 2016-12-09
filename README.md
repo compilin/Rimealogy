@@ -14,11 +14,11 @@ To avoid spoiling yourself too much, the last two (optional) parameters control 
 
 DrawSelection controls which pawns to draw the tree(s) from (so those and *every named character related to them* will be drawn):
 
- * colony: Your own colonists
+ * colony (default value): Your own colonists
  * seen: All characters you've seen (visitors, raiders, etc...)
  * all: All human characters
 
 NameSelection controls which character have their name shown:
- * seen: All characters you've seen will be named
+ * seen (default value): All characters you've seen will be named
  * related: Characters directly related (parent/child as well as romance or ex-romance) to your own colonists will be named
  * all: Show all names
